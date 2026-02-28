@@ -7,11 +7,12 @@ import csv
 
 st.set_page_config(page_title="Due Regard Explorer", layout="wide")
 st.title("✈️ Due Regard Mid-Air Collision Explorer")
-st.markdown("**Straighter trajectories per Appendix A-7 + Manual UAS speed control**")
+st.markdown("**No negative altitudes + Realistic vertical rates per Appendix A-7 + Manual UAS speed**")
 
 # ====================== CONDITIONAL DISTRIBUTIONS ======================
 altitude_blocks = ["Below 5,500 ft MSL", "5,500–10,000 ft MSL", "10k–FL180", "FL180–FL290", "FL290–FL410", "Above FL410"]
 altitude_base_ft = [3000, 7500, 14000, 24000, 34000, 45000]
+altitude_min_ft = [500, 5000, 10000, 18000, 29000, 41000]   # new minimum floor
 
 regions = ["Any (Unspecified)", "North Pacific", "West Pacific", "East Pacific", "Gulf of Mexico", "Caribbean", "North Atlantic", "Central Atlantic"]
 region_probs = np.array([0.12, 0.08, 0.15, 0.10, 0.25, 0.22, 0.08]); region_probs /= region_probs.sum()
@@ -19,7 +20,7 @@ region_probs = np.array([0.12, 0.08, 0.15, 0.10, 0.25, 0.22, 0.08]); region_prob
 airspeed_bins = [125, 225, 325, 425, 525, 600]
 
 def get_airspeed_probs(alt_idx):
-    if alt_idx <= 1:   # low altitude
+    if alt_idx <= 1:
         return np.array([0.25, 0.35, 0.25, 0.10, 0.04, 0.01])
     elif alt_idx <= 3:
         return np.array([0.05, 0.15, 0.30, 0.35, 0.12, 0.03])
@@ -45,7 +46,8 @@ def sample_due_regard_encounter(alt_idx=None, region=None):
     if region is None or region == "Any (Unspecified)":
         region = np.random.choice(regions[1:], p=region_probs)
     
-    own_alt = altitude_base_ft[alt_idx] + np.random.uniform(-500, 500)
+    own_alt = max(altitude_min_ft[alt_idx], altitude_base_ft[alt_idx] + np.random.uniform(-400, 400))
+    alt_diff = np.random.uniform(-3000, 3000) if alt_idx > 1 else np.random.uniform(-1500, 1500)
     
     return {
         "alt_block": alt_block, "region": region,
@@ -61,10 +63,12 @@ def sample_due_regard_encounter(alt_idx=None, region=None):
         "dh2": float(np.random.choice(vert_rate_bins, p=vert_rate_probs)),
         "sep_nm": float(np.random.uniform(5, 20)),
         "bearing": float(np.random.uniform(0, 360)),
-        "alt_diff": float(np.random.uniform(-3500, 3500)),
+        "alt_diff": alt_diff,
         "own_start_alt": own_alt,
-        "intr_start_alt": own_alt + float(np.random.uniform(-3500, 3500))
+        "intr_start_alt": max(500, own_alt + alt_diff)
     }
+
+# (generate_realistic_trajectories and calculate_cpa_realistic remain the same as the previous straighter version)
 
 def generate_realistic_trajectories(params, duration_sec=1200, dt=2.0, resample_sec=180):
     n = int(duration_sec / dt) + 1
@@ -79,7 +83,7 @@ def generate_realistic_trajectories(params, duration_sec=1200, dt=2.0, resample_
     next_resample = resample_sec
     for i in range(1, n):
         if t[i] >= next_resample:
-            turn1 = np.random.choice(turn_bins) * 0.20   # even gentler
+            turn1 = np.random.choice(turn_bins) * 0.20
             accel1 = np.random.choice(accel_bins) * 0.20
             dh1 = np.random.choice(vert_rate_bins, p=vert_rate_probs) * 0.20 / 60.0
             next_resample += resample_sec
@@ -205,6 +209,7 @@ with tab1:
             st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
+    # Monte Carlo tab remains unchanged (visuals intact)
     st.subheader("Monte Carlo Simulator + Visuals + CSV Export")
     n_runs = st.slider("Number of simulations", 100, 10000, 2000, step=100)
     fix_ownship = st.checkbox("Fix MY aircraft (UAS)", value=True)
@@ -283,5 +288,5 @@ with tab2:
             st.download_button("📥 Download Full CSV", output.getvalue(), f"due_regard_uas_{n_runs}_runs.csv", "text/csv", use_container_width=True)
 
 with st.sidebar:
-    st.success("✅ Trajectories now much straighter")
-    st.caption("Resampling every 3 minutes • Strong bias to level flight")
+    st.success("✅ No more negative altitudes + straighter trajectories")
+    st.caption("All altitudes clamped to realistic positive values")

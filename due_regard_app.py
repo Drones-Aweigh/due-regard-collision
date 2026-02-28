@@ -7,9 +7,9 @@ import csv
 
 st.set_page_config(page_title="Due Regard Explorer", layout="wide")
 st.title("✈️ Due Regard Mid-Air Collision Explorer")
-st.markdown("**Conditional Appendix A sampling + Full visuals in Monte Carlo** — Distinct low vs high altitude behavior")
+st.markdown("**Conditional Appendix A sampling + Manual UAS speed control** — Distinct low vs high altitude behavior")
 
-# ====================== CONDITIONAL DISTRIBUTIONS (per Appendix A) ======================
+# ====================== CONDITIONAL DISTRIBUTIONS ======================
 altitude_blocks = ["Below 5,500 ft MSL", "5,500–10,000 ft MSL", "10k–FL180", "FL180–FL290", "FL290–FL410", "Above FL410"]
 altitude_base_ft = [3000, 7500, 14000, 24000, 34000, 45000]
 
@@ -49,8 +49,7 @@ def sample_due_regard_encounter(alt_idx=None, region=None):
     
     return {
         "alt_block": alt_block, "region": region,
-        "v1": float(np.random.choice(airspeed_bins, p=get_airspeed_probs(alt_idx))),
-        "v2": float(np.random.choice(airspeed_bins, p=get_airspeed_probs(alt_idx))),
+        "v2": float(np.random.choice(airspeed_bins, p=get_airspeed_probs(alt_idx))),  # Intruder only
         "hdg1": float(np.random.choice(heading_bins, p=heading_probs)),
         "hdg2": float(np.random.choice(heading_bins, p=heading_probs)),
         "turn1": float(np.random.choice(turn_bins, p=turn_probs)),
@@ -145,10 +144,13 @@ with tab1:
         st.subheader("Generate Realistic Encounter")
         alt_idx = st.selectbox("Altitude Block", range(6), format_func=lambda i: altitude_blocks[i])
         region_sel = st.selectbox("Geographic Domain", regions)
+        own_v = st.slider("Ownship UAS Speed (kts)", 25, 250, 80)   # ← New manual control
         show_3d = st.checkbox("Show 3D View", value=True)
         if st.button("Generate Random Normal Encounter", type="primary", use_container_width=True):
-            st.session_state.params = sample_due_regard_encounter(alt_idx, region_sel)
-            st.success("✅ Conditional encounter loaded!")
+            p = sample_due_regard_encounter(alt_idx, region_sel)
+            p["v1"] = own_v   # Override with manual slider
+            st.session_state.params = p
+            st.success("✅ Conditional encounter loaded with manual UAS speed!")
     with col2:
         p = st.session_state.get("params", sample_due_regard_encounter())
         miss, t_cpa, risk, x1, y1, z1, x2, y2, z2, t_plot, is_well_clear, is_nmac = calculate_cpa_realistic(p)
@@ -160,7 +162,7 @@ with tab1:
         with c1:
             st.markdown("**Ownship (UAS)**")
             st.write(f"**Starting Altitude:** {p['own_start_alt']:.0f} ft")
-            st.write(f"**Speed:** {p['v1']:.1f} kts")
+            st.write(f"**Speed:** {p['v1']:.1f} kts **(manual)**")
             st.write(f"**Heading:** {p['hdg1']:.1f}°")
             st.write(f"**Turn Rate:** {p['turn1']:.2f} °/s")
             st.write(f"**Acceleration:** {p['accel1']:.2f} kts/s")
@@ -210,7 +212,7 @@ with tab2:
     show_visuals = st.checkbox("Show Visuals after run", value=True)
     
     if fix_ownship:
-        own_v = st.slider("My UAS Speed (kts)", 25, 600, 80)
+        own_v = st.slider("My UAS Speed (kts)", 25, 250, 80)   # Limited to realistic UAS range
         own_hdg = st.slider("My Heading (°)", 0, 360, 0)
     if fix_alt:
         own_alt_idx = st.selectbox("Fixed Altitude Block", range(6), format_func=lambda i: altitude_blocks[i])
@@ -268,7 +270,6 @@ with tab2:
                     fig_scatter.update_layout(xaxis_title="Time to CPA (min)", yaxis_title="Miss Distance (ft)")
                     st.plotly_chart(fig_scatter, use_container_width=True)
                 
-                # 3D CPA Cloud
                 fig3d = go.Figure()
                 fig3d.add_trace(go.Scatter3d(x=np.random.normal(0, 10000, n_runs), y=np.random.normal(0, 10000, n_runs), z=np.random.normal(0, 1000, n_runs), mode='markers', marker=dict(size=3, color='red', opacity=0.6)))
                 fig3d.update_layout(title="3D CPA Cloud (all runs)", scene=dict(xaxis_title='East (ft)', yaxis_title='North (ft)', zaxis_title='Altitude (ft)'), height=500)
@@ -278,8 +279,8 @@ with tab2:
             writer = csv.DictWriter(output, fieldnames=runs_data[0].keys())
             writer.writeheader()
             writer.writerows(runs_data)
-            st.download_button("📥 Download Full CSV", output.getvalue(), f"due_regard_conditional_{n_runs}_runs.csv", "text/csv", use_container_width=True)
+            st.download_button("📥 Download Full CSV", output.getvalue(), f"due_regard_uas_{n_runs}_runs.csv", "text/csv", use_container_width=True)
 
 with st.sidebar:
-    st.success("✅ Visuals restored in Monte Carlo")
-    st.caption("Histogram • Scatter • 3D CPA Cloud")
+    st.success("✅ Manual Ownship speed control added in both tabs")
+    st.caption("UAS speed limited to realistic range (25–250 kts)")

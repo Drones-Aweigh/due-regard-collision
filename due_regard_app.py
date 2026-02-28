@@ -7,7 +7,7 @@ import csv
 
 st.set_page_config(page_title="Due Regard Explorer", layout="wide")
 st.title("✈️ Due Regard Mid-Air Collision Explorer")
-st.markdown("**Realistic vertical rates per Appendix A-7 + Manual UAS speed control**")
+st.markdown("**Straighter trajectories per Appendix A-7 + Manual UAS speed control**")
 
 # ====================== CONDITIONAL DISTRIBUTIONS ======================
 altitude_blocks = ["Below 5,500 ft MSL", "5,500–10,000 ft MSL", "10k–FL180", "FL180–FL290", "FL290–FL410", "Above FL410"]
@@ -23,7 +23,7 @@ def get_airspeed_probs(alt_idx):
         return np.array([0.25, 0.35, 0.25, 0.10, 0.04, 0.01])
     elif alt_idx <= 3:
         return np.array([0.05, 0.15, 0.30, 0.35, 0.12, 0.03])
-    else:              # high altitude
+    else:
         return np.array([0.01, 0.03, 0.08, 0.45, 0.35, 0.08])
 
 heading_bins = np.arange(0, 361, 60)
@@ -33,12 +33,10 @@ accel_bins = [-1.5, -0.5, -0.1, 0.0, 0.1, 0.5, 1.5]
 accel_probs = np.array([0.01, 0.02, 0.05, 0.84, 0.05, 0.02, 0.01]); accel_probs /= accel_probs.sum()
 
 turn_bins = [-3.5, -1.5, -0.5, -0.1, 0.0, 0.1, 0.5, 1.5, 3.5]
-turn_probs = np.array([0.01, 0.02, 0.04, 0.05, 0.76, 0.05, 0.04, 0.02, 0.01]); turn_probs /= turn_probs.sum()
+turn_probs = np.array([0.01, 0.02, 0.04, 0.05, 0.80, 0.05, 0.04, 0.02, 0.01]); turn_probs /= turn_probs.sum()
 
-# Realistic vertical rate bins & probs matching Appendix A-7 (heavy peak at zero)
 vert_rate_bins = np.array([-3000, -2000, -1000, -400, 0, 400, 1000, 2000, 3000])
-vert_rate_probs = np.array([0.02, 0.04, 0.08, 0.15, 0.42, 0.15, 0.08, 0.04, 0.02])
-vert_rate_probs /= vert_rate_probs.sum()
+vert_rate_probs = np.array([0.02, 0.04, 0.08, 0.15, 0.50, 0.15, 0.08, 0.04, 0.02]); vert_rate_probs /= vert_rate_probs.sum()
 
 def sample_due_regard_encounter(alt_idx=None, region=None):
     if alt_idx is None:
@@ -51,7 +49,7 @@ def sample_due_regard_encounter(alt_idx=None, region=None):
     
     return {
         "alt_block": alt_block, "region": region,
-        "v1": 80.0,   # default — overridden by manual slider
+        "v1": 80.0,
         "v2": float(np.random.choice(airspeed_bins, p=get_airspeed_probs(alt_idx))),
         "hdg1": float(np.random.choice(heading_bins, p=heading_probs)),
         "hdg2": float(np.random.choice(heading_bins, p=heading_probs)),
@@ -59,8 +57,8 @@ def sample_due_regard_encounter(alt_idx=None, region=None):
         "turn2": float(np.random.choice(turn_bins, p=turn_probs)),
         "accel1": float(np.random.choice(accel_bins, p=accel_probs)),
         "accel2": float(np.random.choice(accel_bins, p=accel_probs)),
-        "dh1": float(np.random.choice(vert_rate_bins, p=vert_rate_probs)),   # ft/min
-        "dh2": float(np.random.choice(vert_rate_bins, p=vert_rate_probs)),   # ft/min
+        "dh1": float(np.random.choice(vert_rate_bins, p=vert_rate_probs)),
+        "dh2": float(np.random.choice(vert_rate_bins, p=vert_rate_probs)),
         "sep_nm": float(np.random.uniform(5, 20)),
         "bearing": float(np.random.uniform(0, 360)),
         "alt_diff": float(np.random.uniform(-3500, 3500)),
@@ -68,7 +66,7 @@ def sample_due_regard_encounter(alt_idx=None, region=None):
         "intr_start_alt": own_alt + float(np.random.uniform(-3500, 3500))
     }
 
-def generate_realistic_trajectories(params, duration_sec=1200, dt=2.0, resample_sec=90):
+def generate_realistic_trajectories(params, duration_sec=1200, dt=2.0, resample_sec=180):
     n = int(duration_sec / dt) + 1
     t = np.arange(0, duration_sec + dt/2, dt)
     
@@ -77,13 +75,13 @@ def generate_realistic_trajectories(params, duration_sec=1200, dt=2.0, resample_
     v1 = params["v1"] * 1.68781
     psi1 = np.deg2rad(params["hdg1"])
     h1 = 0.0
-    turn1 = 0.0; accel1 = 0.0; dh1 = params["dh1"] / 60.0   # convert to ft/s for integration
+    turn1 = 0.0; accel1 = 0.0; dh1 = params["dh1"] / 60.0
     next_resample = resample_sec
     for i in range(1, n):
         if t[i] >= next_resample:
-            turn1 = np.random.choice(turn_bins) * 0.25
-            accel1 = np.random.choice(accel_bins) * 0.25
-            dh1 = np.random.choice(vert_rate_bins, p=vert_rate_probs) / 60.0
+            turn1 = np.random.choice(turn_bins) * 0.20   # even gentler
+            accel1 = np.random.choice(accel_bins) * 0.20
+            dh1 = np.random.choice(vert_rate_bins, p=vert_rate_probs) * 0.20 / 60.0
             next_resample += resample_sec
         v1 = max(25 * 1.68781, v1 + accel1 * dt)
         psi1 += np.deg2rad(turn1) * dt
@@ -108,9 +106,9 @@ def generate_realistic_trajectories(params, duration_sec=1200, dt=2.0, resample_
     z2[0] = h2
     for i in range(1, n):
         if t[i] >= next_resample:
-            turn2 = np.random.choice(turn_bins) * 0.25
-            accel2 = np.random.choice(accel_bins) * 0.25
-            dh2 = np.random.choice(vert_rate_bins, p=vert_rate_probs) / 60.0
+            turn2 = np.random.choice(turn_bins) * 0.20
+            accel2 = np.random.choice(accel_bins) * 0.20
+            dh2 = np.random.choice(vert_rate_bins, p=vert_rate_probs) * 0.20 / 60.0
             next_resample += resample_sec
         v2 = max(25 * 1.68781, v2 + accel2 * dt)
         psi2 += np.deg2rad(turn2) * dt
@@ -203,7 +201,7 @@ with tab1:
             fig.add_trace(go.Scatter3d(x=x2, y=y2, z=z2, mode='lines', name='Intruder', line=dict(color='#FF4500', width=6)))
             idx = np.argmin(np.sqrt((x1-x2)**2 + (y1-y2)**2 + (z1-z2)**2))
             fig.add_trace(go.Scatter3d(x=[x1[idx]], y=[y1[idx]], z=[z1[idx]], mode='markers', marker=dict(size=12, color='yellow', symbol='diamond'), name='CPA'))
-            fig.update_layout(title="3D Trajectories", scene=dict(xaxis_title='East (ft)', yaxis_title='North (ft)', zaxis_title='Altitude (ft)'), height=700, template="plotly_dark")
+            fig.update_layout(title="3D Trajectories — Mostly Straight", scene=dict(xaxis_title='East (ft)', yaxis_title='North (ft)', zaxis_title='Altitude (ft)'), height=700, template="plotly_dark")
             st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
@@ -285,5 +283,5 @@ with tab2:
             st.download_button("📥 Download Full CSV", output.getvalue(), f"due_regard_uas_{n_runs}_runs.csv", "text/csv", use_container_width=True)
 
 with st.sidebar:
-    st.success("✅ Vertical rates now realistic per Appendix A-7")
-    st.caption("Strong bias to level flight • Max ±3,000 ft/min")
+    st.success("✅ Trajectories now much straighter")
+    st.caption("Resampling every 3 minutes • Strong bias to level flight")

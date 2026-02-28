@@ -7,7 +7,7 @@ import csv
 
 st.set_page_config(page_title="Due Regard Explorer", layout="wide")
 st.title("✈️ Due Regard Mid-Air Collision Explorer")
-st.markdown("**Corrected vertical rates per Appendix A-7 + Manual UAS speed control**")
+st.markdown("**Realistic vertical rates per Appendix A-7 + Manual UAS speed control**")
 
 # ====================== CONDITIONAL DISTRIBUTIONS ======================
 altitude_blocks = ["Below 5,500 ft MSL", "5,500–10,000 ft MSL", "10k–FL180", "FL180–FL290", "FL290–FL410", "Above FL410"]
@@ -35,7 +35,7 @@ accel_probs = np.array([0.01, 0.02, 0.05, 0.84, 0.05, 0.02, 0.01]); accel_probs 
 turn_bins = [-3.5, -1.5, -0.5, -0.1, 0.0, 0.1, 0.5, 1.5, 3.5]
 turn_probs = np.array([0.01, 0.02, 0.04, 0.05, 0.76, 0.05, 0.04, 0.02, 0.01]); turn_probs /= turn_probs.sum()
 
-# Improved vertical rate bins/probs to match Appendix A-7 (heavy peak at zero)
+# Realistic vertical rate bins & probs matching Appendix A-7 (heavy peak at zero)
 vert_rate_bins = np.array([-3000, -2000, -1000, -400, 0, 400, 1000, 2000, 3000])
 vert_rate_probs = np.array([0.02, 0.04, 0.08, 0.15, 0.42, 0.15, 0.08, 0.04, 0.02])
 vert_rate_probs /= vert_rate_probs.sum()
@@ -59,8 +59,8 @@ def sample_due_regard_encounter(alt_idx=None, region=None):
         "turn2": float(np.random.choice(turn_bins, p=turn_probs)),
         "accel1": float(np.random.choice(accel_bins, p=accel_probs)),
         "accel2": float(np.random.choice(accel_bins, p=accel_probs)),
-        "dh1": float(np.random.choice(vert_rate_bins, p=vert_rate_probs)),
-        "dh2": float(np.random.choice(vert_rate_bins, p=vert_rate_probs)),
+        "dh1": float(np.random.choice(vert_rate_bins, p=vert_rate_probs)),   # ft/min
+        "dh2": float(np.random.choice(vert_rate_bins, p=vert_rate_probs)),   # ft/min
         "sep_nm": float(np.random.uniform(5, 20)),
         "bearing": float(np.random.uniform(0, 360)),
         "alt_diff": float(np.random.uniform(-3500, 3500)),
@@ -77,13 +77,13 @@ def generate_realistic_trajectories(params, duration_sec=1200, dt=2.0, resample_
     v1 = params["v1"] * 1.68781
     psi1 = np.deg2rad(params["hdg1"])
     h1 = 0.0
-    turn1 = 0.0; accel1 = 0.0; dh1 = params["dh1"] / 60.0   # start with sampled value
+    turn1 = 0.0; accel1 = 0.0; dh1 = params["dh1"] / 60.0   # convert to ft/s for integration
     next_resample = resample_sec
     for i in range(1, n):
         if t[i] >= next_resample:
             turn1 = np.random.choice(turn_bins) * 0.25
             accel1 = np.random.choice(accel_bins) * 0.25
-            dh1 = np.random.choice(vert_rate_bins) * 0.25 / 60.0   # gentler changes
+            dh1 = np.random.choice(vert_rate_bins, p=vert_rate_probs) / 60.0
             next_resample += resample_sec
         v1 = max(25 * 1.68781, v1 + accel1 * dt)
         psi1 += np.deg2rad(turn1) * dt
@@ -110,7 +110,7 @@ def generate_realistic_trajectories(params, duration_sec=1200, dt=2.0, resample_
         if t[i] >= next_resample:
             turn2 = np.random.choice(turn_bins) * 0.25
             accel2 = np.random.choice(accel_bins) * 0.25
-            dh2 = np.random.choice(vert_rate_bins) * 0.25 / 60.0
+            dh2 = np.random.choice(vert_rate_bins, p=vert_rate_probs) / 60.0
             next_resample += resample_sec
         v2 = max(25 * 1.68781, v2 + accel2 * dt)
         psi2 += np.deg2rad(turn2) * dt
@@ -169,7 +169,7 @@ with tab1:
             st.write(f"**Heading:** {p['hdg1']:.1f}°")
             st.write(f"**Turn Rate:** {p['turn1']:.2f} °/s")
             st.write(f"**Acceleration:** {p['accel1']:.2f} kts/s")
-            st.write(f"**Vertical Rate:** {p['dh1']*60:.0f} ft/min")
+            st.write(f"**Vertical Rate:** {p['dh1']:.0f} ft/min")
         with c2:
             st.markdown("**Intruder**")
             st.write(f"**Starting Altitude:** {p['intr_start_alt']:.0f} ft")
@@ -177,7 +177,7 @@ with tab1:
             st.write(f"**Heading:** {p['hdg2']:.1f}°")
             st.write(f"**Turn Rate:** {p['turn2']:.2f} °/s")
             st.write(f"**Acceleration:** {p['accel2']:.2f} kts/s")
-            st.write(f"**Vertical Rate:** {p['dh2']*60:.0f} ft/min")
+            st.write(f"**Vertical Rate:** {p['dh2']:.0f} ft/min")
         
         st.write(f"**Initial Separation:** {p.get('sep_nm', 0):.1f} NM")
         
@@ -286,4 +286,4 @@ with tab2:
 
 with st.sidebar:
     st.success("✅ Vertical rates now realistic per Appendix A-7")
-    st.caption("Max ±3000 ft/min • Heavy bias to level flight")
+    st.caption("Strong bias to level flight • Max ±3,000 ft/min")

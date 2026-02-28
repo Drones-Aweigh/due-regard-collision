@@ -6,7 +6,7 @@ import csv
 
 st.set_page_config(page_title="Due Regard Explorer", layout="wide")
 st.title("✈️ Due Regard Mid-Air Collision Explorer")
-st.markdown("**Exact Appendix A weighting from MIT-LL ATC-397 (2013)** — Smoother trajectories + Well Clear & NMAC checks + UAS 25 kts min")
+st.markdown("**Exact Appendix A weighting from MIT-LL ATC-397 (2013)** — Pure nominal flight + Well Clear & NMAC checks + UAS 25 kts min")
 
 # ====================== EXACT APPENDIX A WEIGHTED DISTRIBUTIONS ======================
 altitude_blocks = ["Below 5,500 ft MSL", "5,500–10,000 ft MSL", "10k–FL180", "FL180–FL290", "FL290–FL410", "Above FL410"]
@@ -51,7 +51,7 @@ def generate_realistic_trajectories(params, duration_sec=1200, dt=2.0, resample_
     n = int(duration_sec / dt) + 1
     t = np.arange(0, duration_sec + dt/2, dt)
     
-    # Ownship (3D)
+    # Ownship
     x1 = np.zeros(n); y1 = np.zeros(n); z1 = np.zeros(n)
     v1 = params["v1"] * 1.68781
     psi1 = np.deg2rad(params["hdg1"])
@@ -60,7 +60,7 @@ def generate_realistic_trajectories(params, duration_sec=1200, dt=2.0, resample_
     next_resample = resample_sec
     for i in range(1, n):
         if t[i] >= next_resample:
-            turn1 = np.random.choice(turn_bins) * 0.25   # much gentler
+            turn1 = np.random.choice(turn_bins) * 0.25
             accel1 = np.random.choice(accel_bins) * 0.25
             dh1 = np.random.choice(vert_rate_bins) * 0.25 / 60.0
             next_resample += resample_sec
@@ -108,11 +108,8 @@ def calculate_cpa_realistic(params):
     idx = np.argmin(dists)
     miss_dist = float(dists[idx])
     t_cpa = float(t[idx])
-    
-    # Pure geometric risk (no TCAS)
     risk = max(0.0, min(1.0, (225 - miss_dist) / 225))
     
-    # Well Clear and NMAC checks (standard UAS thresholds)
     horiz_miss = np.hypot(x1[idx]-x2[idx], y1[idx]-y2[idx])
     vert_miss = abs(z1[idx] - z2[idx])
     is_well_clear = (horiz_miss >= 4000) and (vert_miss >= 700)
@@ -132,10 +129,11 @@ with tab1:
         show_3d = st.checkbox("Show 3D View", value=True)
         if st.button("Generate Random Normal Encounter", type="primary", use_container_width=True):
             st.session_state.params = sample_due_regard_encounter(alt_idx, region_sel)
-            st.success("✅ Smoother realistic encounter loaded!")
+            st.success("✅ Realistic encounter loaded!")
     with col2:
         p = st.session_state.get("params", sample_due_regard_encounter())
         miss, t_cpa, risk, x1, y1, z1, x2, y2, z2, t_plot, is_well_clear, is_nmac, horiz_miss, vert_miss = calculate_cpa_realistic(p)
+        
         st.info(f"**{p['alt_block']}** — **{p['region']}** (10-minute flight)")
         c1, c2, c3 = st.columns(3)
         c1.metric("Miss Distance", f"{miss:.0f} ft")
@@ -143,9 +141,15 @@ with tab1:
         c3.metric("Risk", f"{risk*100:.0f}%")
         st.progress(risk)
         
-        st.write("**Safety Checks**")
-        st.success("✅ Well Clear") if is_well_clear else st.error("❌ Well Clear Violation")
-        st.error("❌ NMAC") if is_nmac else st.success("✅ No NMAC")
+        st.subheader("Safety Checks")
+        if is_well_clear:
+            st.success("✅ Well Clear")
+        else:
+            st.error("❌ Well Clear Violation")
+        if is_nmac:
+            st.error("❌ NMAC")
+        else:
+            st.success("✅ No NMAC")
         
         if show_3d:
             fig = go.Figure()
@@ -213,5 +217,5 @@ with tab2:
             st.download_button("📥 Download Full CSV", output.getvalue(), f"due_regard_uas_pure_{n_runs}_runs.csv", "text/csv", use_container_width=True)
 
 with st.sidebar:
-    st.success("✅ Smoother trajectories + Well Clear & NMAC checks added")
+    st.success("✅ Clean safety checks + smoother trajectories")
     st.caption("Pure nominal flight — no TCAS")

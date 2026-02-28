@@ -7,7 +7,7 @@ import csv
 
 st.set_page_config(page_title="Due Regard Explorer", layout="wide")
 st.title("✈️ Due Regard Mid-Air Collision Explorer")
-st.markdown("**Conditional Appendix A sampling + Manual UAS Ownship Speed Control** — Distinct low vs high altitude behavior")
+st.markdown("**Corrected vertical rates per Appendix A-7 + Manual UAS speed control**")
 
 # ====================== CONDITIONAL DISTRIBUTIONS ======================
 altitude_blocks = ["Below 5,500 ft MSL", "5,500–10,000 ft MSL", "10k–FL180", "FL180–FL290", "FL290–FL410", "Above FL410"]
@@ -35,8 +35,10 @@ accel_probs = np.array([0.01, 0.02, 0.05, 0.84, 0.05, 0.02, 0.01]); accel_probs 
 turn_bins = [-3.5, -1.5, -0.5, -0.1, 0.0, 0.1, 0.5, 1.5, 3.5]
 turn_probs = np.array([0.01, 0.02, 0.04, 0.05, 0.76, 0.05, 0.04, 0.02, 0.01]); turn_probs /= turn_probs.sum()
 
-vert_rate_bins = [-4000, -2000, -1000, -400, 0, 400, 1000, 2000, 4000]
-vert_rate_probs = np.array([0.01, 0.03, 0.08, 0.15, 0.46, 0.15, 0.08, 0.03, 0.01]); vert_rate_probs /= vert_rate_probs.sum()
+# Improved vertical rate bins/probs to match Appendix A-7 (heavy peak at zero)
+vert_rate_bins = np.array([-3000, -2000, -1000, -400, 0, 400, 1000, 2000, 3000])
+vert_rate_probs = np.array([0.02, 0.04, 0.08, 0.15, 0.42, 0.15, 0.08, 0.04, 0.02])
+vert_rate_probs /= vert_rate_probs.sum()
 
 def sample_due_regard_encounter(alt_idx=None, region=None):
     if alt_idx is None:
@@ -49,7 +51,7 @@ def sample_due_regard_encounter(alt_idx=None, region=None):
     
     return {
         "alt_block": alt_block, "region": region,
-        "v1": 80.0,   # default — will be overridden by manual slider
+        "v1": 80.0,   # default — overridden by manual slider
         "v2": float(np.random.choice(airspeed_bins, p=get_airspeed_probs(alt_idx))),
         "hdg1": float(np.random.choice(heading_bins, p=heading_probs)),
         "hdg2": float(np.random.choice(heading_bins, p=heading_probs)),
@@ -75,13 +77,13 @@ def generate_realistic_trajectories(params, duration_sec=1200, dt=2.0, resample_
     v1 = params["v1"] * 1.68781
     psi1 = np.deg2rad(params["hdg1"])
     h1 = 0.0
-    turn1 = 0.0; accel1 = 0.0; dh1 = 0.0
+    turn1 = 0.0; accel1 = 0.0; dh1 = params["dh1"] / 60.0   # start with sampled value
     next_resample = resample_sec
     for i in range(1, n):
         if t[i] >= next_resample:
             turn1 = np.random.choice(turn_bins) * 0.25
             accel1 = np.random.choice(accel_bins) * 0.25
-            dh1 = np.random.choice(vert_rate_bins) * 0.25 / 60.0
+            dh1 = np.random.choice(vert_rate_bins) * 0.25 / 60.0   # gentler changes
             next_resample += resample_sec
         v1 = max(25 * 1.68781, v1 + accel1 * dt)
         psi1 += np.deg2rad(turn1) * dt
@@ -97,7 +99,7 @@ def generate_realistic_trajectories(params, duration_sec=1200, dt=2.0, resample_
     v2 = params["v2"] * 1.68781
     psi2 = np.deg2rad(params["hdg2"])
     h2 = params["alt_diff"]
-    turn2 = 0.0; accel2 = 0.0; dh2 = 0.0
+    turn2 = 0.0; accel2 = 0.0; dh2 = params["dh2"] / 60.0
     next_resample = resample_sec
     sep_ft = params["sep_nm"] * 6076.12
     bearing = np.deg2rad(params["bearing"])
@@ -145,13 +147,13 @@ with tab1:
         st.subheader("Generate Realistic Encounter")
         alt_idx = st.selectbox("Altitude Block", range(6), format_func=lambda i: altitude_blocks[i])
         region_sel = st.selectbox("Geographic Domain", regions)
-        own_v = st.slider("Ownship UAS Speed (kts)", 25, 250, 80)   # ← Manual control
+        own_v = st.slider("Ownship UAS Speed (kts)", 25, 250, 80)
         show_3d = st.checkbox("Show 3D View", value=True)
         if st.button("Generate Random Normal Encounter", type="primary", use_container_width=True):
             p = sample_due_regard_encounter(alt_idx, region_sel)
-            p["v1"] = own_v   # Override with manual slider
+            p["v1"] = own_v
             st.session_state.params = p
-            st.success("✅ Conditional encounter loaded with manual UAS speed!")
+            st.success("✅ Realistic encounter loaded!")
     with col2:
         p = st.session_state.get("params", sample_due_regard_encounter())
         miss, t_cpa, risk, x1, y1, z1, x2, y2, z2, t_plot, is_well_clear, is_nmac = calculate_cpa_realistic(p)
@@ -221,7 +223,7 @@ with tab2:
         own_region = st.selectbox("Fixed Geographic Domain", regions)
     
     if st.button("🚀 Run Monte Carlo & Download CSV", type="primary"):
-        with st.spinner(f"Running {n_runs} conditional encounters..."):
+        with st.spinner(f"Running {n_runs} encounters..."):
             runs_data = []
             misses = []
             t_cpas = []
@@ -283,5 +285,5 @@ with tab2:
             st.download_button("📥 Download Full CSV", output.getvalue(), f"due_regard_uas_{n_runs}_runs.csv", "text/csv", use_container_width=True)
 
 with st.sidebar:
-    st.success("✅ Manual Ownship speed control added in Interactive tab")
-    st.caption("UAS speed limited to realistic range (25–250 kts)")
+    st.success("✅ Vertical rates now realistic per Appendix A-7")
+    st.caption("Max ±3000 ft/min • Heavy bias to level flight")

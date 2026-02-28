@@ -6,7 +6,7 @@ import csv
 
 st.set_page_config(page_title="Due Regard Explorer", layout="wide")
 st.title("✈️ Due Regard Mid-Air Collision Explorer")
-st.markdown("**Exact Appendix A weighting from MIT-LL ATC-397 (2013)** — Pure nominal flight (no TCAS) + UAS 25 kts min + 10,000-run Monte Carlo + 3D")
+st.markdown("**Exact Appendix A weighting from MIT-LL ATC-397 (2013)** — Smoother trajectories + Well Clear & NMAC checks + UAS 25 kts min")
 
 # ====================== EXACT APPENDIX A WEIGHTED DISTRIBUTIONS ======================
 altitude_blocks = ["Below 5,500 ft MSL", "5,500–10,000 ft MSL", "10k–FL180", "FL180–FL290", "FL290–FL410", "Above FL410"]
@@ -47,7 +47,7 @@ def sample_due_regard_encounter(alt_idx=None, region=None):
         "alt_diff": float(np.random.uniform(-3500, 3500))
     }
 
-def generate_realistic_trajectories(params, duration_sec=1200, dt=2.0, resample_sec=30):
+def generate_realistic_trajectories(params, duration_sec=1200, dt=2.0, resample_sec=90):
     n = int(duration_sec / dt) + 1
     t = np.arange(0, duration_sec + dt/2, dt)
     
@@ -60,9 +60,9 @@ def generate_realistic_trajectories(params, duration_sec=1200, dt=2.0, resample_
     next_resample = resample_sec
     for i in range(1, n):
         if t[i] >= next_resample:
-            turn1 = np.random.choice(turn_bins) * 0.4
-            accel1 = np.random.choice(accel_bins) * 0.4
-            dh1 = np.random.choice(vert_rate_bins) * 0.4 / 60.0
+            turn1 = np.random.choice(turn_bins) * 0.25   # much gentler
+            accel1 = np.random.choice(accel_bins) * 0.25
+            dh1 = np.random.choice(vert_rate_bins) * 0.25 / 60.0
             next_resample += resample_sec
         v1 = max(25 * 1.68781, v1 + accel1 * dt)
         psi1 += np.deg2rad(turn1) * dt
@@ -87,9 +87,9 @@ def generate_realistic_trajectories(params, duration_sec=1200, dt=2.0, resample_
     z2[0] = h2
     for i in range(1, n):
         if t[i] >= next_resample:
-            turn2 = np.random.choice(turn_bins) * 0.4
-            accel2 = np.random.choice(accel_bins) * 0.4
-            dh2 = np.random.choice(vert_rate_bins) * 0.4 / 60.0
+            turn2 = np.random.choice(turn_bins) * 0.25
+            accel2 = np.random.choice(accel_bins) * 0.25
+            dh2 = np.random.choice(vert_rate_bins) * 0.25 / 60.0
             next_resample += resample_sec
         v2 = max(25 * 1.68781, v2 + accel2 * dt)
         psi2 += np.deg2rad(turn2) * dt
@@ -108,8 +108,17 @@ def calculate_cpa_realistic(params):
     idx = np.argmin(dists)
     miss_dist = float(dists[idx])
     t_cpa = float(t[idx])
-    risk = max(0.0, min(1.0, (225 - miss_dist) / 225))   # Pure geometric risk (no TCAS)
-    return miss_dist, t_cpa, risk, x1, y1, z1, x2, y2, z2, t
+    
+    # Pure geometric risk (no TCAS)
+    risk = max(0.0, min(1.0, (225 - miss_dist) / 225))
+    
+    # Well Clear and NMAC checks (standard UAS thresholds)
+    horiz_miss = np.hypot(x1[idx]-x2[idx], y1[idx]-y2[idx])
+    vert_miss = abs(z1[idx] - z2[idx])
+    is_well_clear = (horiz_miss >= 4000) and (vert_miss >= 700)
+    is_nmac = (horiz_miss < 500) and (vert_miss < 100)
+    
+    return miss_dist, t_cpa, risk, x1, y1, z1, x2, y2, z2, t, is_well_clear, is_nmac, horiz_miss, vert_miss
 
 # ====================== TABS ======================
 tab1, tab2 = st.tabs(["Interactive Explorer", "Monte Carlo + CSV"])
@@ -123,23 +132,28 @@ with tab1:
         show_3d = st.checkbox("Show 3D View", value=True)
         if st.button("Generate Random Normal Encounter", type="primary", use_container_width=True):
             st.session_state.params = sample_due_regard_encounter(alt_idx, region_sel)
-            st.success("✅ Pure nominal encounter loaded (no TCAS)")
+            st.success("✅ Smoother realistic encounter loaded!")
     with col2:
         p = st.session_state.get("params", sample_due_regard_encounter())
-        miss, t_cpa, risk, x1, y1, z1, x2, y2, z2, t_plot = calculate_cpa_realistic(p)
+        miss, t_cpa, risk, x1, y1, z1, x2, y2, z2, t_plot, is_well_clear, is_nmac, horiz_miss, vert_miss = calculate_cpa_realistic(p)
         st.info(f"**{p['alt_block']}** — **{p['region']}** (10-minute flight)")
         c1, c2, c3 = st.columns(3)
         c1.metric("Miss Distance", f"{miss:.0f} ft")
         c2.metric("Time to CPA", f"{t_cpa/60:.1f} min")
         c3.metric("Risk", f"{risk*100:.0f}%")
         st.progress(risk)
+        
+        st.write("**Safety Checks**")
+        st.success("✅ Well Clear") if is_well_clear else st.error("❌ Well Clear Violation")
+        st.error("❌ NMAC") if is_nmac else st.success("✅ No NMAC")
+        
         if show_3d:
             fig = go.Figure()
             fig.add_trace(go.Scatter3d(x=x1, y=y1, z=z1, mode='lines', name='Ownship (UAS)', line=dict(color='#1E90FF', width=6)))
             fig.add_trace(go.Scatter3d(x=x2, y=y2, z=z2, mode='lines', name='Intruder', line=dict(color='#FF4500', width=6)))
             idx = np.argmin(np.sqrt((x1-x2)**2 + (y1-y2)**2 + (z1-z2)**2))
             fig.add_trace(go.Scatter3d(x=[x1[idx]], y=[y1[idx]], z=[z1[idx]], mode='markers', marker=dict(size=12, color='yellow', symbol='diamond'), name='CPA'))
-            fig.update_layout(title="3D Trajectories — Pure Nominal Flight (No TCAS)", scene=dict(xaxis_title='East (ft)', yaxis_title='North (ft)', zaxis_title='Altitude (ft)'), height=700, template="plotly_dark")
+            fig.update_layout(title="3D Trajectories — Mostly Straight + Gentle Turns", scene=dict(xaxis_title='East (ft)', yaxis_title='North (ft)', zaxis_title='Altitude (ft)'), height=700, template="plotly_dark")
             st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
@@ -158,8 +172,10 @@ with tab2:
         own_region = st.selectbox("Fixed Geographic Domain", regions)
     
     if st.button("🚀 Run Monte Carlo & Download CSV", type="primary"):
-        with st.spinner(f"Running {n_runs} pure nominal encounters..."):
+        with st.spinner(f"Running {n_runs} encounters..."):
             runs_data = []
+            nmac_count = 0
+            well_clear_violations = 0
             for i in range(n_runs):
                 p = sample_due_regard_encounter()
                 if fix_ownship:
@@ -169,7 +185,7 @@ with tab2:
                     p["alt_block"] = altitude_blocks[own_alt_idx]
                 if fix_region:
                     p["region"] = own_region
-                miss, t_cpa, risk, _, _, _, _, _, _, _ = calculate_cpa_realistic(p)
+                miss, t_cpa, risk, _, _, _, _, _, _, _, is_well_clear, is_nmac, _, _ = calculate_cpa_realistic(p)
                 runs_data.append({
                     "run_id": i+1,
                     "ownship_speed_kts": round(p["v1"],1),
@@ -182,9 +198,13 @@ with tab2:
                     "altitude_block": p["alt_block"],
                     "region": p["region"]
                 })
+                if is_nmac: nmac_count += 1
+                if not is_well_clear: well_clear_violations += 1
             
             misses = [r["miss_distance_ft"] for r in runs_data]
-            st.success(f"Completed {n_runs} runs • Mean miss: {np.mean(misses):.0f} ft • NMAC rate: {(np.array(misses)<500).mean()*100:.1f}%")
+            st.success(f"Completed {n_runs} runs • Mean miss: {np.mean(misses):.0f} ft")
+            st.error(f"NMAC rate: {(nmac_count/n_runs)*100:.2f}%")
+            st.warning(f"Well Clear violation rate: {(well_clear_violations/n_runs)*100:.2f}%")
             
             output = io.StringIO()
             writer = csv.DictWriter(output, fieldnames=runs_data[0].keys())
@@ -193,5 +213,5 @@ with tab2:
             st.download_button("📥 Download Full CSV", output.getvalue(), f"due_regard_uas_pure_{n_runs}_runs.csv", "text/csv", use_container_width=True)
 
 with st.sidebar:
-    st.success("✅ TCAS completely removed — pure nominal flight only")
-    st.caption("100% faithful to MIT-LL ATC-397")
+    st.success("✅ Smoother trajectories + Well Clear & NMAC checks added")
+    st.caption("Pure nominal flight — no TCAS")

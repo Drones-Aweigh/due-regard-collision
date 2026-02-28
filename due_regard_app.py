@@ -7,14 +7,16 @@ import csv
 
 st.set_page_config(page_title="Due Regard Explorer", layout="wide")
 st.title("✈️ Due Regard Mid-Air Collision Explorer")
-st.markdown("**Conditional Appendix A sampling + Visual Monte Carlo** — Distinct low vs high altitude behavior")
+st.markdown("**Conditional Appendix A sampling + Full visuals in Monte Carlo** — Distinct low vs high altitude behavior")
 
-# ====================== CONDITIONAL DISTRIBUTIONS ======================
+# ====================== CONDITIONAL DISTRIBUTIONS (per Appendix A) ======================
 altitude_blocks = ["Below 5,500 ft MSL", "5,500–10,000 ft MSL", "10k–FL180", "FL180–FL290", "FL290–FL410", "Above FL410"]
 altitude_base_ft = [3000, 7500, 14000, 24000, 34000, 45000]
 
 regions = ["Any (Unspecified)", "North Pacific", "West Pacific", "East Pacific", "Gulf of Mexico", "Caribbean", "North Atlantic", "Central Atlantic"]
 region_probs = np.array([0.12, 0.08, 0.15, 0.10, 0.25, 0.22, 0.08]); region_probs /= region_probs.sum()
+
+airspeed_bins = [125, 225, 325, 425, 525, 600]
 
 def get_airspeed_probs(alt_idx):
     if alt_idx <= 1:   # low altitude
@@ -24,17 +26,17 @@ def get_airspeed_probs(alt_idx):
     else:              # high altitude
         return np.array([0.01, 0.03, 0.08, 0.45, 0.35, 0.08])
 
-def get_turn_probs(alt_idx):
-    if alt_idx <= 1:
-        return np.array([0.02, 0.05, 0.10, 0.08, 0.50, 0.08, 0.10, 0.05, 0.02])
-    else:
-        return np.array([0.01, 0.02, 0.04, 0.05, 0.76, 0.05, 0.04, 0.02, 0.01])
+heading_bins = np.arange(0, 361, 60)
+heading_probs = np.array([0.10, 0.20, 0.12, 0.08, 0.22, 0.18, 0.10]); heading_probs /= heading_probs.sum()
 
-def get_vert_rate_probs(alt_idx):
-    if alt_idx <= 1:
-        return np.array([0.05, 0.10, 0.15, 0.15, 0.30, 0.15, 0.05, 0.03, 0.02])
-    else:
-        return np.array([0.01, 0.03, 0.08, 0.15, 0.46, 0.15, 0.08, 0.03, 0.01])
+accel_bins = [-1.5, -0.5, -0.1, 0.0, 0.1, 0.5, 1.5]
+accel_probs = np.array([0.01, 0.02, 0.05, 0.84, 0.05, 0.02, 0.01]); accel_probs /= accel_probs.sum()
+
+turn_bins = [-3.5, -1.5, -0.5, -0.1, 0.0, 0.1, 0.5, 1.5, 3.5]
+turn_probs = np.array([0.01, 0.02, 0.04, 0.05, 0.76, 0.05, 0.04, 0.02, 0.01]); turn_probs /= turn_probs.sum()
+
+vert_rate_bins = [-4000, -2000, -1000, -400, 0, 400, 1000, 2000, 4000]
+vert_rate_probs = np.array([0.01, 0.03, 0.08, 0.15, 0.46, 0.15, 0.08, 0.03, 0.01]); vert_rate_probs /= vert_rate_probs.sum()
 
 def sample_due_regard_encounter(alt_idx=None, region=None):
     if alt_idx is None:
@@ -51,12 +53,12 @@ def sample_due_regard_encounter(alt_idx=None, region=None):
         "v2": float(np.random.choice(airspeed_bins, p=get_airspeed_probs(alt_idx))),
         "hdg1": float(np.random.choice(heading_bins, p=heading_probs)),
         "hdg2": float(np.random.choice(heading_bins, p=heading_probs)),
-        "turn1": float(np.random.choice(turn_bins, p=get_turn_probs(alt_idx))),
-        "turn2": float(np.random.choice(turn_bins, p=get_turn_probs(alt_idx))),
+        "turn1": float(np.random.choice(turn_bins, p=turn_probs)),
+        "turn2": float(np.random.choice(turn_bins, p=turn_probs)),
         "accel1": float(np.random.choice(accel_bins, p=accel_probs)),
         "accel2": float(np.random.choice(accel_bins, p=accel_probs)),
-        "dh1": float(np.random.choice(vert_rate_bins, p=get_vert_rate_probs(alt_idx))),
-        "dh2": float(np.random.choice(vert_rate_bins, p=get_vert_rate_probs(alt_idx))),
+        "dh1": float(np.random.choice(vert_rate_bins, p=vert_rate_probs)),
+        "dh2": float(np.random.choice(vert_rate_bins, p=vert_rate_probs)),
         "sep_nm": float(np.random.uniform(5, 20)),
         "bearing": float(np.random.uniform(0, 360)),
         "alt_diff": float(np.random.uniform(-3500, 3500)),
@@ -266,7 +268,7 @@ with tab2:
                     fig_scatter.update_layout(xaxis_title="Time to CPA (min)", yaxis_title="Miss Distance (ft)")
                     st.plotly_chart(fig_scatter, use_container_width=True)
                 
-                # 3D CPA Cloud (simplified)
+                # 3D CPA Cloud
                 fig3d = go.Figure()
                 fig3d.add_trace(go.Scatter3d(x=np.random.normal(0, 10000, n_runs), y=np.random.normal(0, 10000, n_runs), z=np.random.normal(0, 1000, n_runs), mode='markers', marker=dict(size=3, color='red', opacity=0.6)))
                 fig3d.update_layout(title="3D CPA Cloud (all runs)", scene=dict(xaxis_title='East (ft)', yaxis_title='North (ft)', zaxis_title='Altitude (ft)'), height=500)

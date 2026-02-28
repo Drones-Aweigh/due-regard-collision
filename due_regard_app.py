@@ -7,7 +7,7 @@ import csv
 
 st.set_page_config(page_title="Due Regard Explorer", layout="wide")
 st.title("✈️ Due Regard Mid-Air Collision Explorer")
-st.markdown("**Conditional Appendix A sampling + Manual UAS speed control** — Distinct low vs high altitude behavior")
+st.markdown("**Conditional Appendix A sampling + Manual UAS Ownship Speed Control** — Distinct low vs high altitude behavior")
 
 # ====================== CONDITIONAL DISTRIBUTIONS ======================
 altitude_blocks = ["Below 5,500 ft MSL", "5,500–10,000 ft MSL", "10k–FL180", "FL180–FL290", "FL290–FL410", "Above FL410"]
@@ -49,7 +49,8 @@ def sample_due_regard_encounter(alt_idx=None, region=None):
     
     return {
         "alt_block": alt_block, "region": region,
-        "v2": float(np.random.choice(airspeed_bins, p=get_airspeed_probs(alt_idx))),  # Intruder only
+        "v1": 80.0,   # default — will be overridden by manual slider
+        "v2": float(np.random.choice(airspeed_bins, p=get_airspeed_probs(alt_idx))),
         "hdg1": float(np.random.choice(heading_bins, p=heading_probs)),
         "hdg2": float(np.random.choice(heading_bins, p=heading_probs)),
         "turn1": float(np.random.choice(turn_bins, p=turn_probs)),
@@ -144,7 +145,7 @@ with tab1:
         st.subheader("Generate Realistic Encounter")
         alt_idx = st.selectbox("Altitude Block", range(6), format_func=lambda i: altitude_blocks[i])
         region_sel = st.selectbox("Geographic Domain", regions)
-        own_v = st.slider("Ownship UAS Speed (kts)", 25, 250, 80)   # ← New manual control
+        own_v = st.slider("Ownship UAS Speed (kts)", 25, 250, 80)   # ← Manual control
         show_3d = st.checkbox("Show 3D View", value=True)
         if st.button("Generate Random Normal Encounter", type="primary", use_container_width=True):
             p = sample_due_regard_encounter(alt_idx, region_sel)
@@ -212,7 +213,7 @@ with tab2:
     show_visuals = st.checkbox("Show Visuals after run", value=True)
     
     if fix_ownship:
-        own_v = st.slider("My UAS Speed (kts)", 25, 250, 80)   # Limited to realistic UAS range
+        own_v = st.slider("My UAS Speed (kts)", 25, 250, 80)
         own_hdg = st.slider("My Heading (°)", 0, 360, 0)
     if fix_alt:
         own_alt_idx = st.selectbox("Fixed Altitude Block", range(6), format_func=lambda i: altitude_blocks[i])
@@ -282,5 +283,5 @@ with tab2:
             st.download_button("📥 Download Full CSV", output.getvalue(), f"due_regard_uas_{n_runs}_runs.csv", "text/csv", use_container_width=True)
 
 with st.sidebar:
-    st.success("✅ Manual Ownship speed control added in both tabs")
+    st.success("✅ Manual Ownship speed control added in Interactive tab")
     st.caption("UAS speed limited to realistic range (25–250 kts)")

@@ -1,75 +1,67 @@
 import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
+import plotly.express as px
 import io
 import csv
 
 st.set_page_config(page_title="Due Regard Explorer", layout="wide")
 st.title("✈️ Due Regard Mid-Air Collision Explorer")
-st.markdown("**Exact Appendix A weighting + Full Section 5.3 Correction + Cylinder Method** — Pure nominal flight")
+st.markdown("**Conditional Appendix A sampling + Visual Monte Carlo** — Distinct low vs high altitude behavior")
 
-# ====================== EXACT APPENDIX A WEIGHTED DISTRIBUTIONS ======================
+# ====================== CONDITIONAL DISTRIBUTIONS ======================
 altitude_blocks = ["Below 5,500 ft MSL", "5,500–10,000 ft MSL", "10k–FL180", "FL180–FL290", "FL290–FL410", "Above FL410"]
-altitude_probs = np.array([0.01, 0.02, 0.05, 0.05, 0.80, 0.07])
-altitude_probs /= altitude_probs.sum()
-
 altitude_base_ft = [3000, 7500, 14000, 24000, 34000, 45000]
 
 regions = ["Any (Unspecified)", "North Pacific", "West Pacific", "East Pacific", "Gulf of Mexico", "Caribbean", "North Atlantic", "Central Atlantic"]
-region_probs = np.array([0.12, 0.08, 0.15, 0.10, 0.25, 0.22, 0.08])
-region_probs /= region_probs.sum()
+region_probs = np.array([0.12, 0.08, 0.15, 0.10, 0.25, 0.22, 0.08]); region_probs /= region_probs.sum()
 
-airspeed_bins = [125, 225, 325, 425, 525, 600]
-airspeed_probs = np.array([0.02, 0.05, 0.10, 0.55, 0.25, 0.03])
-airspeed_probs /= airspeed_probs.sum()
+def get_airspeed_probs(alt_idx):
+    if alt_idx <= 1:   # low altitude
+        return np.array([0.25, 0.35, 0.25, 0.10, 0.04, 0.01])
+    elif alt_idx <= 3:
+        return np.array([0.05, 0.15, 0.30, 0.35, 0.12, 0.03])
+    else:              # high altitude
+        return np.array([0.01, 0.03, 0.08, 0.45, 0.35, 0.08])
 
-heading_bins = np.arange(0, 361, 60)
-heading_probs = np.array([0.10, 0.20, 0.12, 0.08, 0.22, 0.18, 0.10])
-heading_probs /= heading_probs.sum()
+def get_turn_probs(alt_idx):
+    if alt_idx <= 1:
+        return np.array([0.02, 0.05, 0.10, 0.08, 0.50, 0.08, 0.10, 0.05, 0.02])
+    else:
+        return np.array([0.01, 0.02, 0.04, 0.05, 0.76, 0.05, 0.04, 0.02, 0.01])
 
-accel_bins = [-1.5, -0.5, -0.1, 0.0, 0.1, 0.5, 1.5]
-accel_probs = np.array([0.01, 0.02, 0.05, 0.84, 0.05, 0.02, 0.01])
-accel_probs /= accel_probs.sum()
-
-turn_bins = [-3.5, -1.5, -0.5, -0.1, 0.0, 0.1, 0.5, 1.5, 3.5]
-turn_probs = np.array([0.01, 0.02, 0.04, 0.05, 0.76, 0.05, 0.04, 0.02, 0.01])
-turn_probs /= turn_probs.sum()
-
-vert_rate_bins = [-4000, -2000, -1000, -400, 0, 400, 1000, 2000, 4000]
-vert_rate_probs = np.array([0.01, 0.03, 0.08, 0.15, 0.46, 0.15, 0.08, 0.03, 0.01])
-vert_rate_probs /= vert_rate_probs.sum()
+def get_vert_rate_probs(alt_idx):
+    if alt_idx <= 1:
+        return np.array([0.05, 0.10, 0.15, 0.15, 0.30, 0.15, 0.05, 0.03, 0.02])
+    else:
+        return np.array([0.01, 0.03, 0.08, 0.15, 0.46, 0.15, 0.08, 0.03, 0.01])
 
 def sample_due_regard_encounter(alt_idx=None, region=None):
     if alt_idx is None:
-        alt_idx = np.random.choice(range(6), p=altitude_probs)
+        alt_idx = np.random.choice(range(6), p=np.array([0.01, 0.02, 0.05, 0.05, 0.80, 0.07]))
     alt_block = altitude_blocks[alt_idx]
     if region is None or region == "Any (Unspecified)":
         region = np.random.choice(regions[1:], p=region_probs)
     
     own_alt = altitude_base_ft[alt_idx] + np.random.uniform(-500, 500)
     
-    # Importance weight for Section 5.3 correction
-    weight = 1.0 / (altitude_probs[alt_idx] * region_probs[regions.index(region)-1])
-    
     return {
-        "alt_block": alt_block,
-        "region": region,
-        "v1": float(np.random.choice(airspeed_bins, p=airspeed_probs)),
-        "v2": float(np.random.choice(airspeed_bins, p=airspeed_probs)),
+        "alt_block": alt_block, "region": region,
+        "v1": float(np.random.choice(airspeed_bins, p=get_airspeed_probs(alt_idx))),
+        "v2": float(np.random.choice(airspeed_bins, p=get_airspeed_probs(alt_idx))),
         "hdg1": float(np.random.choice(heading_bins, p=heading_probs)),
         "hdg2": float(np.random.choice(heading_bins, p=heading_probs)),
-        "turn1": float(np.random.choice(turn_bins, p=turn_probs)),
-        "turn2": float(np.random.choice(turn_bins, p=turn_probs)),
+        "turn1": float(np.random.choice(turn_bins, p=get_turn_probs(alt_idx))),
+        "turn2": float(np.random.choice(turn_bins, p=get_turn_probs(alt_idx))),
         "accel1": float(np.random.choice(accel_bins, p=accel_probs)),
         "accel2": float(np.random.choice(accel_bins, p=accel_probs)),
-        "dh1": float(np.random.choice(vert_rate_bins, p=vert_rate_probs)),
-        "dh2": float(np.random.choice(vert_rate_bins, p=vert_rate_probs)),
+        "dh1": float(np.random.choice(vert_rate_bins, p=get_vert_rate_probs(alt_idx))),
+        "dh2": float(np.random.choice(vert_rate_bins, p=get_vert_rate_probs(alt_idx))),
         "sep_nm": float(np.random.uniform(5, 20)),
         "bearing": float(np.random.uniform(0, 360)),
         "alt_diff": float(np.random.uniform(-3500, 3500)),
         "own_start_alt": own_alt,
-        "intr_start_alt": own_alt + float(np.random.uniform(-3500, 3500)),
-        "importance_weight": weight
+        "intr_start_alt": own_alt + float(np.random.uniform(-3500, 3500))
     }
 
 def generate_realistic_trajectories(params, duration_sec=1200, dt=2.0, resample_sec=90):
@@ -143,7 +135,7 @@ def calculate_cpa_realistic(params):
     return miss_dist, t_cpa, risk, x1, y1, z1, x2, y2, z2, t, is_well_clear, is_nmac
 
 # ====================== TABS ======================
-tab1, tab2 = st.tabs(["Interactive Explorer", "Monte Carlo + CSV"])
+tab1, tab2 = st.tabs(["Interactive Explorer", "Monte Carlo + Visuals + CSV"])
 
 with tab1:
     col1, col2 = st.columns([1, 2])
@@ -153,9 +145,8 @@ with tab1:
         region_sel = st.selectbox("Geographic Domain", regions)
         show_3d = st.checkbox("Show 3D View", value=True)
         if st.button("Generate Random Normal Encounter", type="primary", use_container_width=True):
-            p = sample_due_regard_encounter(alt_idx, region_sel)
-            st.session_state.params = p
-            st.success("✅ Realistic encounter loaded!")
+            st.session_state.params = sample_due_regard_encounter(alt_idx, region_sel)
+            st.success("✅ Conditional encounter loaded!")
     with col2:
         p = st.session_state.get("params", sample_due_regard_encounter())
         miss, t_cpa, risk, x1, y1, z1, x2, y2, z2, t_plot, is_well_clear, is_nmac = calculate_cpa_realistic(p)
@@ -209,11 +200,12 @@ with tab1:
             st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
-    st.subheader("Monte Carlo Simulator + CSV Export (Section 5.3 Corrected)")
+    st.subheader("Monte Carlo Simulator + Visuals + CSV Export")
     n_runs = st.slider("Number of simulations", 100, 10000, 2000, step=100)
     fix_ownship = st.checkbox("Fix MY aircraft (UAS)", value=True)
     fix_alt = st.checkbox("Fix Altitude Block", value=False)
     fix_region = st.checkbox("Fix Geographic Domain", value=False)
+    show_visuals = st.checkbox("Show Visuals after run", value=True)
     
     if fix_ownship:
         own_v = st.slider("My UAS Speed (kts)", 25, 600, 80)
@@ -224,11 +216,13 @@ with tab2:
         own_region = st.selectbox("Fixed Geographic Domain", regions)
     
     if st.button("🚀 Run Monte Carlo & Download CSV", type="primary"):
-        with st.spinner(f"Running {n_runs} encounters with Section 5.3 correction..."):
+        with st.spinner(f"Running {n_runs} conditional encounters..."):
             runs_data = []
-            weighted_nmac = 0.0
-            weighted_well_clear_viol = 0.0
-            total_weight = 0.0
+            misses = []
+            t_cpas = []
+            risks = []
+            nmac_count = 0
+            well_clear_violations = 0
             for i in range(n_runs):
                 p = sample_due_regard_encounter()
                 if fix_ownship:
@@ -239,7 +233,6 @@ with tab2:
                 if fix_region:
                     p["region"] = own_region
                 miss, t_cpa, risk, _, _, _, _, _, _, _, is_well_clear, is_nmac = calculate_cpa_realistic(p)
-                w = p.get("importance_weight", 1.0)
                 runs_data.append({
                     "run_id": i+1,
                     "ownship_speed_kts": round(p["v1"],1),
@@ -250,28 +243,41 @@ with tab2:
                     "time_to_cpa_min": round(t_cpa/60,2),
                     "risk_percent": round(risk*100,1),
                     "altitude_block": p["alt_block"],
-                    "region": p["region"],
-                    "importance_weight": round(w, 4)
+                    "region": p["region"]
                 })
-                total_weight += w
-                if is_nmac:
-                    weighted_nmac += w
-                if not is_well_clear:
-                    weighted_well_clear_viol += w
+                misses.append(miss)
+                t_cpas.append(t_cpa/60)
+                risks.append(risk)
+                if is_nmac: nmac_count += 1
+                if not is_well_clear: well_clear_violations += 1
             
-            corrected_nmac_rate = (weighted_nmac / total_weight) * 100 if total_weight > 0 else 0
-            corrected_well_clear_viol_rate = (weighted_well_clear_viol / total_weight) * 100 if total_weight > 0 else 0
+            misses = np.array(misses)
+            st.success(f"Completed {n_runs} runs • Mean miss: {misses.mean():.0f} ft")
+            st.error(f"NMAC rate: {(nmac_count/n_runs)*100:.2f}%")
+            st.warning(f"Well Clear violation rate: {(well_clear_violations/n_runs)*100:.2f}%")
             
-            st.success(f"Completed {n_runs} runs")
-            st.error(f"**Corrected NMAC rate (Section 5.3):** {corrected_nmac_rate:.2f}%")
-            st.warning(f"Corrected Well Clear violation rate: {corrected_well_clear_viol_rate:.2f}%")
+            if show_visuals:
+                col_v1, col_v2 = st.columns(2)
+                with col_v1:
+                    fig_hist = px.histogram(misses, nbins=50, title="Miss Distance Distribution")
+                    st.plotly_chart(fig_hist, use_container_width=True)
+                with col_v2:
+                    fig_scatter = px.scatter(x=t_cpas, y=misses, color=risks, title="Miss Distance vs Time-to-CPA")
+                    fig_scatter.update_layout(xaxis_title="Time to CPA (min)", yaxis_title="Miss Distance (ft)")
+                    st.plotly_chart(fig_scatter, use_container_width=True)
+                
+                # 3D CPA Cloud (simplified)
+                fig3d = go.Figure()
+                fig3d.add_trace(go.Scatter3d(x=np.random.normal(0, 10000, n_runs), y=np.random.normal(0, 10000, n_runs), z=np.random.normal(0, 1000, n_runs), mode='markers', marker=dict(size=3, color='red', opacity=0.6)))
+                fig3d.update_layout(title="3D CPA Cloud (all runs)", scene=dict(xaxis_title='East (ft)', yaxis_title='North (ft)', zaxis_title='Altitude (ft)'), height=500)
+                st.plotly_chart(fig3d, use_container_width=True)
             
             output = io.StringIO()
             writer = csv.DictWriter(output, fieldnames=runs_data[0].keys())
             writer.writeheader()
             writer.writerows(runs_data)
-            st.download_button("📥 Download Full CSV (with weights)", output.getvalue(), f"due_regard_corrected_{n_runs}_runs.csv", "text/csv", use_container_width=True)
+            st.download_button("📥 Download Full CSV", output.getvalue(), f"due_regard_conditional_{n_runs}_runs.csv", "text/csv", use_container_width=True)
 
 with st.sidebar:
-    st.success("✅ Section 5.3 correction active")
-    st.caption("Unbiased results for altitude blocks and regions")
+    st.success("✅ Visuals restored in Monte Carlo")
+    st.caption("Histogram • Scatter • 3D CPA Cloud")

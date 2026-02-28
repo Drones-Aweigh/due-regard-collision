@@ -2,17 +2,18 @@ import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
+import pandas as pd
 import io
 import csv
 
 st.set_page_config(page_title="Due Regard Explorer", layout="wide")
 st.title("✈️ Due Regard Mid-Air Collision Explorer")
-st.markdown("**No negative altitudes + Realistic vertical rates per Appendix A-7 + Manual UAS speed**")
+st.markdown("**Conditional Appendix A sampling + Traffic Density Factor + Manual UAS speed**")
 
 # ====================== CONDITIONAL DISTRIBUTIONS ======================
 altitude_blocks = ["Below 5,500 ft MSL", "5,500–10,000 ft MSL", "10k–FL180", "FL180–FL290", "FL290–FL410", "Above FL410"]
 altitude_base_ft = [3000, 7500, 14000, 24000, 34000, 45000]
-altitude_min_ft = [500, 5000, 10000, 18000, 29000, 41000]   # new minimum floor
+altitude_min_ft = [500, 5000, 10000, 18000, 29000, 41000]
 
 regions = ["Any (Unspecified)", "North Pacific", "West Pacific", "East Pacific", "Gulf of Mexico", "Caribbean", "North Atlantic", "Central Atlantic"]
 region_probs = np.array([0.12, 0.08, 0.15, 0.10, 0.25, 0.22, 0.08]); region_probs /= region_probs.sum()
@@ -67,8 +68,6 @@ def sample_due_regard_encounter(alt_idx=None, region=None):
         "own_start_alt": own_alt,
         "intr_start_alt": max(500, own_alt + alt_diff)
     }
-
-# (generate_realistic_trajectories and calculate_cpa_realistic remain the same as the previous straighter version)
 
 def generate_realistic_trajectories(params, duration_sec=1200, dt=2.0, resample_sec=180):
     n = int(duration_sec / dt) + 1
@@ -205,17 +204,30 @@ with tab1:
             fig.add_trace(go.Scatter3d(x=x2, y=y2, z=z2, mode='lines', name='Intruder', line=dict(color='#FF4500', width=6)))
             idx = np.argmin(np.sqrt((x1-x2)**2 + (y1-y2)**2 + (z1-z2)**2))
             fig.add_trace(go.Scatter3d(x=[x1[idx]], y=[y1[idx]], z=[z1[idx]], mode='markers', marker=dict(size=12, color='yellow', symbol='diamond'), name='CPA'))
-            fig.update_layout(title="3D Trajectories — Mostly Straight", scene=dict(xaxis_title='East (ft)', yaxis_title='North (ft)', zaxis_title='Altitude (ft)'), height=700, template="plotly_dark")
+            fig.update_layout(title="3D Trajectories", scene=dict(xaxis_title='East (ft)', yaxis_title='North (ft)', zaxis_title='Altitude (ft)'), height=700, template="plotly_dark")
             st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
-    # Monte Carlo tab remains unchanged (visuals intact)
-    st.subheader("Monte Carlo Simulator + Visuals + CSV Export")
+    st.subheader("Monte Carlo Simulator + Visuals + Density Factor + CSV Export")
     n_runs = st.slider("Number of simulations", 100, 10000, 2000, step=100)
     fix_ownship = st.checkbox("Fix MY aircraft (UAS)", value=True)
     fix_alt = st.checkbox("Fix Altitude Block", value=False)
     fix_region = st.checkbox("Fix Geographic Domain", value=False)
     show_visuals = st.checkbox("Show Visuals after run", value=True)
+    
+    # ==================== DENSITY FACTOR TABLE ====================
+    st.subheader("Relative Traffic Density (editable)")
+    density_data = []
+    for alt_idx, alt in enumerate(altitude_blocks):
+        for reg in regions[1:]:
+            default_density = 1.0 if (alt_idx >= 4 and reg == "North Atlantic") else \
+                              0.8 if (alt_idx >= 4 and reg in ["Central Atlantic", "North Pacific"]) else \
+                              0.4 if (alt_idx >= 3) else \
+                              0.15 if (reg in ["Gulf of Mexico", "Caribbean"]) else 0.3
+            density_data.append({"Altitude Block": alt, "Region": reg, "Relative Density": default_density})
+    
+    density_df = pd.DataFrame(density_data)
+    edited_df = st.data_editor(density_df, num_rows="fixed", use_container_width=True, key="density_editor")
     
     if fix_ownship:
         own_v = st.slider("My UAS Speed (kts)", 25, 250, 80)
@@ -226,13 +238,11 @@ with tab2:
         own_region = st.selectbox("Fixed Geographic Domain", regions)
     
     if st.button("🚀 Run Monte Carlo & Download CSV", type="primary"):
-        with st.spinner(f"Running {n_runs} encounters..."):
+        with st.spinner(f"Running {n_runs} encounters with density factor..."):
             runs_data = []
-            misses = []
-            t_cpas = []
-            risks = []
-            nmac_count = 0
-            well_clear_violations = 0
+            weighted_nmac = 0.0
+            weighted_well_clear_viol = 0.0
+            total_weight = 0.0
             for i in range(n_runs):
                 p = sample_due_regard_encounter()
                 if fix_ownship:
@@ -242,7 +252,14 @@ with tab2:
                     p["alt_block"] = altitude_blocks[own_alt_idx]
                 if fix_region:
                     p["region"] = own_region
+                
+                # Get density multiplier from edited table
+                density_row = edited_df[(edited_df["Altitude Block"] == p["alt_block"]) & 
+                                       (edited_df["Region"] == p["region"])]
+                density_factor = density_row["Relative Density"].values[0] if not density_row.empty else 1.0
+                
                 miss, t_cpa, risk, _, _, _, _, _, _, _, is_well_clear, is_nmac = calculate_cpa_realistic(p)
+                
                 runs_data.append({
                     "run_id": i+1,
                     "ownship_speed_kts": round(p["v1"],1),
@@ -253,40 +270,32 @@ with tab2:
                     "time_to_cpa_min": round(t_cpa/60,2),
                     "risk_percent": round(risk*100,1),
                     "altitude_block": p["alt_block"],
-                    "region": p["region"]
+                    "region": p["region"],
+                    "density_factor": round(density_factor, 3)
                 })
-                misses.append(miss)
-                t_cpas.append(t_cpa/60)
-                risks.append(risk)
-                if is_nmac: nmac_count += 1
-                if not is_well_clear: well_clear_violations += 1
-            
-            misses = np.array(misses)
-            st.success(f"Completed {n_runs} runs • Mean miss: {misses.mean():.0f} ft")
-            st.error(f"NMAC rate: {(nmac_count/n_runs)*100:.2f}%")
-            st.warning(f"Well Clear violation rate: {(well_clear_violations/n_runs)*100:.2f}%")
-            
-            if show_visuals:
-                col_v1, col_v2 = st.columns(2)
-                with col_v1:
-                    fig_hist = px.histogram(misses, nbins=50, title="Miss Distance Distribution")
-                    st.plotly_chart(fig_hist, use_container_width=True)
-                with col_v2:
-                    fig_scatter = px.scatter(x=t_cpas, y=misses, color=risks, title="Miss Distance vs Time-to-CPA")
-                    fig_scatter.update_layout(xaxis_title="Time to CPA (min)", yaxis_title="Miss Distance (ft)")
-                    st.plotly_chart(fig_scatter, use_container_width=True)
                 
-                fig3d = go.Figure()
-                fig3d.add_trace(go.Scatter3d(x=np.random.normal(0, 10000, n_runs), y=np.random.normal(0, 10000, n_runs), z=np.random.normal(0, 1000, n_runs), mode='markers', marker=dict(size=3, color='red', opacity=0.6)))
-                fig3d.update_layout(title="3D CPA Cloud (all runs)", scene=dict(xaxis_title='East (ft)', yaxis_title='North (ft)', zaxis_title='Altitude (ft)'), height=500)
-                st.plotly_chart(fig3d, use_container_width=True)
+                w = density_factor
+                total_weight += w
+                if is_nmac:
+                    weighted_nmac += w
+                if not is_well_clear:
+                    weighted_well_clear_viol += w
+                
+                misses = [r["miss_distance_ft"] for r in runs_data]
+            
+            corrected_nmac_rate = (weighted_nmac / total_weight) * 100 if total_weight > 0 else 0
+            corrected_well_clear_viol_rate = (weighted_well_clear_viol / total_weight) * 100 if total_weight > 0 else 0
+            
+            st.success(f"Completed {n_runs} runs")
+            st.error(f"**Density-Adjusted NMAC rate:** {corrected_nmac_rate:.2f}%")
+            st.warning(f"Density-Adjusted Well Clear violation rate: {corrected_well_clear_viol_rate:.2f}%")
             
             output = io.StringIO()
             writer = csv.DictWriter(output, fieldnames=runs_data[0].keys())
             writer.writeheader()
             writer.writerows(runs_data)
-            st.download_button("📥 Download Full CSV", output.getvalue(), f"due_regard_uas_{n_runs}_runs.csv", "text/csv", use_container_width=True)
+            st.download_button("📥 Download Full CSV (with density)", output.getvalue(), f"due_regard_density_{n_runs}_runs.csv", "text/csv", use_container_width=True)
 
 with st.sidebar:
-    st.success("✅ No more negative altitudes + straighter trajectories")
-    st.caption("All altitudes clamped to realistic positive values")
+    st.success("✅ Traffic Density Factor added")
+    st.caption("Editable per altitude block & region • Adjusted rates now shown")

@@ -80,9 +80,9 @@ def generate_realistic_trajectories(params, duration_sec=600, dt=2.0):
         dy = v1 * np.sin(psi1) * dt
         x1[i] = x1[i-1] + dx
         y1[i] = y1[i-1] + dy
-        z1[i] = h1   # Corrected: use integrated height directly
+        z1[i] = h1
     
-    # Intruder (identical logic + initial offset)
+    # Intruder
     x2 = np.zeros(n); y2 = np.zeros(n); z2 = np.zeros(n)
     v2 = params["v2"] * 1.68781
     psi2 = np.deg2rad(params["hdg2"])
@@ -109,7 +109,7 @@ def generate_realistic_trajectories(params, duration_sec=600, dt=2.0):
         dy = v2 * np.sin(psi2) * dt
         x2[i] = x2[i-1] + dx
         y2[i] = y2[i-1] + dy
-        z2[i] = h2   # Corrected
+        z2[i] = h2
     
     return x1, y1, z1, x2, y2, z2, t
 
@@ -153,15 +153,7 @@ with tab1:
             fig.add_trace(go.Scatter3d(x=x2, y=y2, z=z2, mode='lines', name='Intruder', line=dict(color='#FF4500', width=6)))
             idx = np.argmin(np.sqrt((x1-x2)**2 + (y1-y2)**2 + (z1-z2)**2))
             fig.add_trace(go.Scatter3d(x=[x1[idx]], y=[y1[idx]], z=[z1[idx]], mode='markers', marker=dict(size=12, color='yellow', symbol='diamond'), name='CPA'))
-            fig.update_layout(title="3D Trajectories — Appendix A Weighted", scene=dict(xaxis_title='East (ft)', yaxis_title='North (ft)', zaxis_title='Altitude (ft)'), height=700, template="plotly_dark")
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=x1, y=y1, name="Ownship", line=dict(color="#1E90FF", width=4)))
-            fig.add_trace(go.Scatter(x=x2, y=y2, name="Intruder", line=dict(color="#FF4500", width=4)))
-            idx = np.argmin(np.hypot(x1-x2, y1-y2))
-            fig.add_trace(go.Scatter(x=[x1[idx]], y=[y1[idx]], mode="markers", marker=dict(size=18, color="yellow", symbol="star"), name="CPA"))
-            fig.update_layout(title="2D Trajectories", xaxis_title="East (ft)", yaxis_title="North (ft)", height=650, template="plotly_dark")
+            fig.update_layout(title="3D Trajectories", scene=dict(xaxis_title='East (ft)', yaxis_title='North (ft)', zaxis_title='Altitude (ft)'), height=700, template="plotly_dark")
             st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
@@ -180,7 +172,7 @@ with tab2:
         own_region = st.selectbox("Fixed Geographic Domain", regions)
     
     if st.button("🚀 Run Monte Carlo & Download CSV", type="primary"):
-        with st.spinner(f"Running {n_runs} Appendix A weighted encounters..."):
+        with st.spinner(f"Running {n_runs} encounters..."):
             runs_data = []
             for i in range(n_runs):
                 p = sample_due_regard_encounter()
@@ -191,7 +183,8 @@ with tab2:
                     p["alt_block"] = altitude_blocks[own_alt_idx]
                 if fix_region:
                     p["region"] = own_region
-                miss, t_cpa, risk, _, _, _, _, _, _ = calculate_cpa_realistic(p)
+                
+                miss, t_cpa, risk, _, _, _, _, _, _, _ = calculate_cpa_realistic(p)   # Fixed unpacking
                 runs_data.append({
                     "run_id": i+1,
                     "ownship_speed_kts": round(p["v1"],1),
@@ -212,8 +205,8 @@ with tab2:
             writer = csv.DictWriter(output, fieldnames=runs_data[0].keys())
             writer.writeheader()
             writer.writerows(runs_data)
-            st.download_button("📥 Download Full CSV", output.getvalue(), f"due_regard_uas_appendixA_{n_runs}_runs.csv", "text/csv", use_container_width=True)
+            st.download_button("📥 Download Full CSV", output.getvalue(), f"due_regard_uas_{n_runs}_runs.csv", "text/csv", use_container_width=True)
 
 with st.sidebar:
-    st.success("✅ Monte Carlo error fixed + full location control added")
+    st.success("✅ Monte Carlo error fixed + full location control")
     st.caption("Gulf of Mexico low altitude vs North Atlantic high altitude now properly weighted")
